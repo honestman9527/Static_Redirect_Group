@@ -1178,5 +1178,13 @@ window.RULES_INTERMEDIATE = {
     "/werveva": {
         "url": "https://example.com",
         "expired_at": "2026-01-15T15:19:00.000Z"
+    },
+    "/12312312": {
+        "url": "https://cn.bing.com",
+        "expired_at": "2026-01-14T15:45:00.000Z"
+    },
+    "/11212": {
+        "url": "http://www.baidu.com",
+        "expired_at": "2026-01-14T16:59:00.000Z"
     }
 };
