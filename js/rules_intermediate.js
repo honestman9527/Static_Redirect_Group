@@ -1194,5 +1194,9 @@ window.RULES_INTERMEDIATE = {
     "/test353": {
         "url": "https://www.bilibili.com/325903362",
         "expired_at": "2026-01-15T19:31:00.000Z"
+    },
+    "/mypan": {
+        "url": "https://op.btzm.me",
+        "expired_at": "2026-01-15T19:38:00.000Z"
     }
 };
