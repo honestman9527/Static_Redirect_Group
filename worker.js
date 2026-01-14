@@ -91,6 +91,17 @@ export default {
             });
         }
 
+        // 严格字符检查: 禁止 Emoji 和非打印字符 (只允许 ASCII 可打印字符)
+        // 范围: 0x21-0x7E (标准 ASCII 符号、数字、字母)
+        // 但 URL 可能包含百分号编码，所以我们检查是否包含非 ASCII 字符
+        // eslint-disable-next-line no-control-regex
+        if (/[^\x00-\x7F]/.test(url)) {
+             return Response.json({ error: "URL contains non-ASCII characters (Emoji/Unicode not allowed)" }, { 
+                status: 400,
+                headers: { "Access-Control-Allow-Origin": "*" }
+            });
+        }
+
         // 检查是否指向自身 (循环重定向保护)
         const baseDomain = env.BASE_DOMAIN || "";
         if (baseDomain) {
@@ -223,10 +234,17 @@ export default {
       }
 
       const fileData = await getResp.json();
-      const content = atob(fileData.content); // Base64 decode
+      
+      // 4. 解析并更新内容
+      // 正确处理 UTF-8 解码: Base64 -> Uint8Array -> String
+      const binaryString = atob(fileData.content.replace(/\s/g, ''));
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const content = new TextDecoder('utf-8').decode(bytes);
       const sha = fileData.sha;
 
-      // 4. 解析并更新内容
       // 提取 JSON 部分: window.RULES_INTERMEDIATE = {...};
       const jsonStart = content.indexOf('{');
       const jsonEnd = content.lastIndexOf('}');
@@ -271,11 +289,15 @@ export default {
       const newJsonStr = JSON.stringify(rules, null, 4);
       const newContent = `window.RULES_INTERMEDIATE = ${newJsonStr};\n`;
       
-      // 处理 UTF-8 字符的 Base64 编码
-      function utf8_to_b64(str) {
-        return btoa(unescape(encodeURIComponent(str)));
+      // 正确处理 UTF-8 编码: String -> Uint8Array -> Base64
+      const encoder = new TextEncoder();
+      const data = encoder.encode(newContent);
+      let binary = '';
+      const len = data.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(data[i]);
       }
-      const finalBase64 = utf8_to_b64(newContent);
+      const finalBase64 = btoa(binary);
 
       const putUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
       const commitMessage = `Add short link: ${pathname}`;
@@ -314,7 +336,11 @@ export default {
       const putRespData = await putResp.json();
 
       // 返回 Commit URL 方便前端跳转
-      const commitUrl = `https://github.com/${owner}/${repo}/commit/${putRespData.content.sha || "main"}`;
+      // 优先使用 commit.sha，如果没有则使用 content.sha，最后回退到 main
+      // GitHub API Response Structure for PUT /contents/:
+      // { "content": { "name": "...", "sha": "BLOB_SHA" }, "commit": { "sha": "COMMIT_SHA", ... } }
+      const commitSha = putRespData.commit ? putRespData.commit.sha : (putRespData.content ? putRespData.content.sha : "main");
+      const commitUrl = `https://github.com/${owner}/${repo}/commit/${commitSha}`;
 
       return Response.json({ 
         success: true, 
