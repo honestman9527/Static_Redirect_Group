@@ -1190,5 +1190,9 @@ window.RULES_INTERMEDIATE = {
     "/re224": {
         "url": "https://github.co",
         "expired_at": "2026-01-21T23:27:00.000Z"
+    },
+    "/hlmjsr": {
+        "url": "https://wtmbl.de5.net",
+        "expired_at": "2026-01-22T03:01:00.000Z"
     }
 };
