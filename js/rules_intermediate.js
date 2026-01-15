@@ -1194,5 +1194,9 @@ window.RULES_INTERMEDIATE = {
     "/hlmjsr": {
         "url": "https://wtmbl.de5.net",
         "expired_at": "2026-01-22T03:01:00.000Z"
+    },
+    "/abcde": {
+        "url": "https://blog.acofork.com/posts/static-redirect-group/",
+        "expired_at": "2026-01-16T03:53:00.000Z"
     }
 };
