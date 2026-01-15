@@ -51,12 +51,13 @@ export default {
     }
 
     try {
-      let pathname, url, expired_at;
+      let pathname, url, expired_at, turnstile_token;
       try {
         const body = await request.json();
         pathname = body.pathname;
         url = body.url;
         expired_at = body.expired_at;
+        turnstile_token = body.turnstile_token;
       } catch (e) {
         return Response.json(
           { error: "Invalid JSON body" },
@@ -65,6 +66,48 @@ export default {
             headers: { "Access-Control-Allow-Origin": "*" },
           }
         );
+      }
+
+      // 0. 验证 Turnstile token
+      const turnstileSecret = env.TURNSTILE_SECRET_KEY;
+      if (turnstileSecret) {
+        if (!turnstile_token) {
+          return Response.json(
+            { error: "Missing Turnstile token" },
+            {
+              status: 400,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
+
+        // 调用 Cloudflare Turnstile 验证 API
+        const turnstileResponse = await fetch(
+          "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              secret: turnstileSecret,
+              response: turnstile_token,
+              remoteip: request.headers.get("CF-Connecting-IP") || "",
+            }),
+          }
+        );
+
+        const turnstileResult = await turnstileResponse.json();
+        if (!turnstileResult.success) {
+          console.error("Turnstile verification failed:", turnstileResult);
+          return Response.json(
+            { error: "人机验证失败，请刷新页面重试" },
+            {
+              status: 403,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
       }
 
       // 1. 验证输入
