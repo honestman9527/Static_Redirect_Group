@@ -1167,29 +1167,9 @@ window.RULES_INTERMEDIATE = {
         "url": "https://blog.acofork.com/posts/onedrive-index/",
         "expired_at": ""
     },
-    "/1231231231": {
-        "url": "https://example.com",
-        "expired_at": "2026-01-14T16:38:00.000Z"
-    },
-    "/5453453453": {
-        "url": "https://baidu.com",
-        "expired_at": "2026-01-14T15:15:00.000Z"
-    },
     "/werveva": {
         "url": "https://example.com",
         "expired_at": "2026-01-15T15:19:00.000Z"
-    },
-    "/12312312": {
-        "url": "https://cn.bing.com",
-        "expired_at": "2026-01-14T15:45:00.000Z"
-    },
-    "/11212": {
-        "url": "http://www.baidu.com",
-        "expired_at": "2026-01-14T16:59:00.000Z"
-    },
-    "/7423947238": {
-        "url": "https://blog.acofork.com",
-        "expired_at": "2026-01-14T19:10:00.000Z"
     },
     "/test353": {
         "url": "https://www.bilibili.com/325903362",
