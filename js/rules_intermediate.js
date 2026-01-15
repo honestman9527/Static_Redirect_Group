@@ -30,5 +30,9 @@ window.RULES_INTERMEDIATE = {
     "/bilibili": {
         "url": "https://www.bilibili.com",
         "expired_at": ""
+    },
+    "/56546": {
+        "url": "https://cf.090227.xyz/",
+        "expired_at": "2026-01-16T09:57:00.000Z"
     }
 };
