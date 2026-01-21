@@ -24,7 +24,7 @@ window.RULES_DIRECT = {
         "expired_at": ""
     },
     "/imgbed": {
-        "url": "https://imgbed.dmsoul.com",
+        "url": "https://raw.7s.nz",
         "expired_at": ""
     }
 };
