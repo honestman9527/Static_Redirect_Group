@@ -51,65 +51,152 @@ export default {
     }
 
       try {
-        let pathname, url, expired_at, turnstile_token, permanent, permanent_password;
+        let pathname,
+          url,
+          expired_at,
+          expire_days,
+          turnstile_token,
+          verification_proof,
+          permanent,
+          permanent_password;
         try {
           const body = await request.json();
           pathname = body.pathname;
           url = body.url;
           expired_at = body.expired_at;
+          expire_days = body.expire_days;
           turnstile_token = body.turnstile_token;
+          verification_proof = body.verification_proof;
           permanent = body.permanent === true;
           permanent_password = body.permanent_password;
         } catch (e) {
           return Response.json(
             { error: "Invalid JSON body" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
-      }
-
-      // 0. 验证 Turnstile token
-      const turnstileSecret = env.TURNSTILE_SECRET_KEY;
-      if (turnstileSecret) {
-        if (!turnstile_token) {
-          return Response.json(
-            { error: "Missing Turnstile token" },
             {
               status: 400,
               headers: { "Access-Control-Allow-Origin": "*" },
             }
           );
+      }
+
+      const clientIp = request.headers.get("CF-Connecting-IP") || "";
+      const verificationWindowSeconds = 5 * 60;
+
+      async function sha256Hex(input) {
+        const buffer = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(input)
+        );
+        return Array.from(new Uint8Array(buffer))
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+      }
+
+      async function buildVerificationProof(expiresAtSeconds) {
+        return sha256Hex(
+          `${env.TURNSTILE_SECRET_KEY}|${clientIp}|${expiresAtSeconds}`
+        );
+      }
+
+      // 0. 验证 Turnstile token
+      const turnstileSecret = env.TURNSTILE_SECRET_KEY;
+      let verificationExpiresAt = 0;
+      let verificationProof = null;
+      if (turnstileSecret) {
+        let verified = false;
+
+        if (
+          typeof verification_proof === "string" &&
+          verification_proof.includes(".")
+        ) {
+          const [expiresAtRaw, signature] = verification_proof.split(".");
+          const expiresAtSeconds = Number(expiresAtRaw);
+
+          if (
+            Number.isInteger(expiresAtSeconds) &&
+            expiresAtSeconds > Math.floor(Date.now() / 1000)
+          ) {
+            const expectedSignature = await buildVerificationProof(
+              expiresAtSeconds
+            );
+            if (signature === expectedSignature) {
+              verified = true;
+              verificationExpiresAt = expiresAtSeconds;
+              verificationProof = verification_proof;
+            }
+          }
         }
 
-        // 调用 Cloudflare Turnstile 验证 API
-        const turnstileResponse = await fetch(
-          "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-              secret: turnstileSecret,
-              response: turnstile_token,
-              remoteip: request.headers.get("CF-Connecting-IP") || "",
-            }),
+        if (!verified) {
+          if (!turnstile_token) {
+            return Response.json(
+              { error: "请完成人机验证" },
+              {
+                status: 400,
+                headers: { "Access-Control-Allow-Origin": "*" },
+              }
+            );
           }
-        );
 
-        const turnstileResult = await turnstileResponse.json();
-        if (!turnstileResult.success) {
-          console.error("Turnstile verification failed:", turnstileResult);
-          return Response.json(
-            { error: "人机验证失败，请刷新页面重试" },
+          const turnstileResponse = await fetch(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
             {
-              status: 403,
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: new URLSearchParams({
+                secret: turnstileSecret,
+                response: turnstile_token,
+                remoteip: clientIp,
+              }),
+            }
+          );
+
+          const turnstileResult = await turnstileResponse.json();
+          if (!turnstileResult.success) {
+            console.error("Turnstile verification failed:", turnstileResult);
+            return Response.json(
+              { error: "人机验证失败，请重新验证后再试" },
+              {
+                status: 403,
+                headers: { "Access-Control-Allow-Origin": "*" },
+              }
+            );
+          }
+
+          verificationExpiresAt =
+            Math.floor(Date.now() / 1000) + verificationWindowSeconds;
+          verificationProof = `${verificationExpiresAt}.${await buildVerificationProof(
+            verificationExpiresAt
+          )}`;
+        }
+
+        if (!verificationProof || !verificationExpiresAt) {
+          return Response.json(
+            { error: "Verification state setup failed" },
+            {
+              status: 500,
               headers: { "Access-Control-Allow-Origin": "*" },
             }
           );
         }
+      }
+
+      function verifiedResponse(payload, init = {}) {
+        const responseBody = { ...payload };
+        if (verificationProof && verificationExpiresAt) {
+          responseBody.verification_proof = verificationProof;
+          responseBody.verification_expires_at = verificationExpiresAt;
+        }
+
+        return Response.json(responseBody, {
+          ...init,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            ...(init.headers || {}),
+          },
+        });
       }
 
       // 1. 验证输入
@@ -119,44 +206,32 @@ export default {
         pathname.length < 5 ||
         pathname.length > 10
       ) {
-        return Response.json(
+        return verifiedResponse(
           { error: "Invalid pathname (5-10 chars)" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
+          { status: 400 }
         );
       }
       // 简单正则验证 pathname 是否只包含允许字符
       if (!/^[a-zA-Z0-9_-]+$/.test(pathname)) {
-        return Response.json(
+        return verifiedResponse(
           { error: "Invalid characters in pathname" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
+          { status: 400 }
         );
       }
 
       if (!url || typeof url !== "string" || url.length > 300) {
-        return Response.json(
+        return verifiedResponse(
           { error: "Invalid URL (max 300 chars)" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
+          { status: 400 }
         );
       }
       try {
         const parsedUrl = new URL(url); // 验证 URL 格式
         // 安全检查: 必须是 http 或 https 协议
         if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-          return Response.json(
+          return verifiedResponse(
             { error: "Invalid URL protocol (only http/https allowed)" },
-            {
-              status: 400,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+            { status: 400 }
           );
         }
 
@@ -165,15 +240,12 @@ export default {
         // 但 URL 可能包含百分号编码，所以我们检查是否包含非 ASCII 字符
         // eslint-disable-next-line no-control-regex
         if (/[^\x00-\x7F]/.test(url)) {
-          return Response.json(
+          return verifiedResponse(
             {
               error:
                 "URL contains non-ASCII characters (Emoji/Unicode not allowed)",
             },
-            {
-              status: 400,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+            { status: 400 }
           );
         }
 
@@ -182,26 +254,17 @@ export default {
         if (baseDomain) {
           // 忽略大小写比较
           if (parsedUrl.hostname.toLowerCase() === baseDomain.toLowerCase()) {
-            return Response.json(
+            return verifiedResponse(
               {
                 error:
                   "Cannot redirect to the URL shortener itself (Loop protection)",
               },
-              {
-                status: 400,
-                headers: { "Access-Control-Allow-Origin": "*" },
-              }
+              { status: 400 }
             );
           }
         }
       } catch (e) {
-        return Response.json(
-          { error: "Invalid URL format" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
+        return verifiedResponse({ error: "Invalid URL format" }, { status: 400 });
       }
 
       // 验证 URL 安全性 (通过 Cloudflare Family DNS)
@@ -239,14 +302,11 @@ export default {
                   const reason = dnsData.Comment
                     ? dnsData.Comment.join(", ")
                     : "Malware/Adult Content";
-                  return Response.json(
+                  return verifiedResponse(
                     {
                       error: `URL blocked by Cloudflare Family DNS: ${reason}`,
                     },
-                    {
-                      status: 400,
-                      headers: { "Access-Control-Allow-Origin": "*" },
-                    }
+                    { status: 400 }
                   );
                 }
               }
@@ -261,17 +321,14 @@ export default {
         console.error("DNS Safety Check Error:", e);
         // 调试模式：如果 DNS 检查出错，返回错误信息而不是静默放行
         // 生产环境通常选择 fail-open (放行) 以保证可用性，但为了排查问题，这里改为 fail-closed
-        return Response.json(
+        return verifiedResponse(
           {
             error:
               "Security check failed: Unable to verify URL safety (" +
               e.message +
               ")",
           },
-          {
-            status: 500,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
+          { status: 500 }
         );
       }
 
@@ -280,12 +337,9 @@ export default {
         const permanentPassword = env.PERMANENT_LINK_PASSWORD;
 
         if (!permanentPassword) {
-          return Response.json(
+          return verifiedResponse(
             { error: "Server configuration error: permanent password not set" },
-            {
-              status: 500,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+            { status: 500 }
           );
         }
 
@@ -293,59 +347,41 @@ export default {
           typeof permanent_password !== "string" ||
           permanent_password !== permanentPassword
         ) {
-          return Response.json(
+          return verifiedResponse(
             { error: "长期短链密码验证失败" },
-            {
-              status: 403,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+            { status: 403 }
           );
         }
       } else {
-        if (!expired_at || typeof expired_at !== "number") {
-          return Response.json(
-            { error: "Invalid expiration timestamp" },
-            {
-              status: 400,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+        if (!Number.isInteger(expire_days) || expire_days < 1 || expire_days > 7) {
+          return verifiedResponse(
+            { error: "Expiration days must be an integer between 1 and 7" },
+            { status: 400 }
           );
         }
 
         // 2. 准备数据
         // 将 Unix 时间戳转换为 ISO 8601 字符串
-        const expiredDate = new Date(expired_at * 1000);
+        const expiredDate = new Date(Date.now() + expire_days * 24 * 3600 * 1000);
         const now = new Date();
         if (isNaN(expiredDate.getTime())) {
-          return Response.json(
-            { error: "Invalid timestamp" },
-            {
-              status: 400,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
-          );
+          return verifiedResponse({ error: "Invalid timestamp" }, { status: 400 });
         }
 
         // 检查有效期是否超过 7 天
         const diffTime = expiredDate.getTime() - now.getTime();
         const diffDays = diffTime / (1000 * 3600 * 24);
         if (diffDays > 7) {
-          return Response.json(
+          return verifiedResponse(
             { error: "Expiration date cannot exceed 7 days from now" },
-            {
-              status: 400,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+            { status: 400 }
           );
         }
         // 检查有效期是否在过去
         if (diffTime <= 0) {
-          return Response.json(
+          return verifiedResponse(
             { error: "Expiration date must be in the future" },
-            {
-              status: 400,
-              headers: { "Access-Control-Allow-Origin": "*" },
-            }
+            { status: 400 }
           );
         }
 
@@ -361,13 +397,7 @@ export default {
       const token = env.GITHUB_TOKEN;
 
       if (!token || !owner || !repo) {
-        return Response.json(
-          { error: "Server configuration error" },
-          {
-            status: 500,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
+        return verifiedResponse({ error: "Server configuration error" }, { status: 500 });
       }
 
       async function fetchGitHubFile(targetPath) {
@@ -421,13 +451,7 @@ export default {
           fetchGitHubFile(directFilePath),
         ]);
       } catch (error) {
-        return Response.json(
-          { error: error.message },
-          {
-            status: 502,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
+        return verifiedResponse({ error: error.message }, { status: 502 });
       }
 
       // 4. 解析并更新内容
@@ -441,25 +465,13 @@ export default {
         rules = parseRulesContent(content);
         directRules = parseRulesContent(directContent);
       } catch (e) {
-        return Response.json(
-          { error: "File content is not valid JSON" },
-          {
-            status: 500,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
+        return verifiedResponse({ error: "File content is not valid JSON" }, { status: 500 });
       }
 
       // 检查是否已存在
       const pathKey = "/" + pathname;
       if (rules[pathKey] || directRules[pathKey]) {
-        return Response.json(
-          { error: "Pathname already exists" },
-          {
-            status: 409,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
+        return verifiedResponse({ error: "Pathname already exists" }, { status: 409 });
       }
 
       // 添加新规则
@@ -504,13 +516,7 @@ export default {
       if (!putResp.ok) {
         const errText = await putResp.text();
         console.error("GitHub API Error:", errText);
-        return Response.json(
-          { error: "Failed to commit to GitHub" },
-          {
-            status: 502,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
+        return verifiedResponse({ error: "Failed to commit to GitHub" }, { status: 502 });
       }
 
       // 构建返回的短链 URL
@@ -530,25 +536,17 @@ export default {
         : "main";
       const commitUrl = `https://github.com/${owner}/${repo}/commit/${commitSha}`;
 
-      return Response.json(
-        {
-          success: true,
-          message: "Short link created",
-          short_url: shortUrl,
-          commit_url: commitUrl,
-        },
-        {
-          headers: { "Access-Control-Allow-Origin": "*" },
-        }
-      );
+      return verifiedResponse({
+        success: true,
+        message: "Short link created",
+        short_url: shortUrl,
+        commit_url: commitUrl,
+      });
     } catch (err) {
       console.error(err);
-      return Response.json(
+      return verifiedResponse(
         { error: "Internal Server Error: " + err.message },
-        {
-          status: 500,
-          headers: { "Access-Control-Allow-Origin": "*" },
-        }
+        { status: 500 }
       );
     }
   },

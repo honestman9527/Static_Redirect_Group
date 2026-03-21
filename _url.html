@@ -503,7 +503,7 @@
       <section class="card">
         <h2>创建短链</h2>
         <p class="card-subtitle">
-          选择创建类型后填写信息。普通短链需要失效时间；长期短链需要额外密码，验证通过后不会自动过期。
+          选择创建类型后填写信息。普通短链按天数设置有效期；长期短链需要额外密码，验证通过后不会自动过期。
         </p>
 
         <form id="createForm">
@@ -545,14 +545,20 @@
 
               <div class="form-group" id="expiredAtGroup">
                 <div class="label-row">
-                  <label for="expired_at">失效时间</label>
-                  <span class="help">当地时间</span>
+                  <label for="expire_days">有效天数</label>
+                  <span class="help">1-7 天</span>
                 </div>
                 <input
-                  type="datetime-local"
-                  id="expired_at"
-                  name="expired_at"
+                  type="number"
+                  id="expire_days"
+                  name="expire_days"
+                  min="1"
+                  max="7"
+                  step="1"
+                  inputmode="numeric"
+                  value="7"
                   required
+                  placeholder="请输入 1 到 7"
                 />
               </div>
             </div>
@@ -635,9 +641,11 @@
       const submitBtn = document.getElementById("submitBtn");
       const temporaryModeInput = document.getElementById("mode-temporary");
       const permanentModeInput = document.getElementById("mode-permanent");
-      const expiredAtInput = document.getElementById("expired_at");
+      const expireDaysInput = document.getElementById("expire_days");
       const passwordInput = document.getElementById("permanent_password");
       const passwordPanel = document.getElementById("passwordPanel");
+      let verificationProof = "";
+      let verificationProofExpiresAt = 0;
 
       function onTurnstileSuccess(token) {
         turnstileToken = token;
@@ -657,11 +665,25 @@
         passwordPanel.classList.toggle("active", permanent);
         passwordInput.required = permanent;
 
-        expiredAtInput.required = !permanent;
-        expiredAtInput.disabled = permanent;
+        expireDaysInput.required = !permanent;
+        expireDaysInput.disabled = permanent;
         if (permanent) {
-          expiredAtInput.value = "";
+          expireDaysInput.value = "7";
         }
+      }
+
+      function hasReusableVerification() {
+        return (
+          verificationProof &&
+          verificationProofExpiresAt &&
+          Date.now() < verificationProofExpiresAt
+        );
+      }
+
+      function updateVerificationProof(proof, expiresAtMillis) {
+        verificationProof = typeof proof === "string" ? proof : "";
+        verificationProofExpiresAt =
+          typeof expiresAtMillis === "number" ? expiresAtMillis : 0;
       }
 
       function setMessage(type, content) {
@@ -688,6 +710,20 @@
           turnstile.reset();
         }
         turnstileToken = null;
+      }
+
+      function refreshVerificationWindow(result) {
+        if (
+          result &&
+          typeof result.verification_proof === "string" &&
+          typeof result.verification_expires_at === "number"
+        ) {
+          updateVerificationProof(
+            result.verification_proof,
+            result.verification_expires_at * 1000
+          );
+          resetTurnstile();
+        }
       }
 
       function buildSuccessNodes(actionsUrl, finalUrl, permanent) {
@@ -744,7 +780,7 @@
       form.addEventListener("submit", async function (e) {
         e.preventDefault();
 
-        if (!turnstileToken) {
+        if (!hasReusableVerification() && !turnstileToken) {
           showError("请完成人机验证");
           return;
         }
@@ -754,7 +790,7 @@
 
         const pathname = document.getElementById("pathname").value.trim();
         const url = document.getElementById("url").value.trim();
-        const expiredAtValue = expiredAtInput.value;
+        const expireDaysValue = expireDaysInput.value.trim();
         const permanent = isPermanentMode();
         const permanentPassword = passwordInput.value;
 
@@ -768,13 +804,12 @@
           return;
         }
 
-        let timestamp = null;
+        let expireDays = null;
         if (!permanent) {
-          const expiredDate = new Date(expiredAtValue);
-          timestamp = Math.floor(expiredDate.getTime() / 1000);
+          expireDays = Number(expireDaysValue);
 
-          if (isNaN(timestamp)) {
-            showError("无效的日期");
+          if (!Number.isInteger(expireDays) || expireDays < 1 || expireDays > 7) {
+            showError("有效天数必须是 1 到 7 的整数");
             return;
           }
         } else if (!permanentPassword) {
@@ -791,9 +826,12 @@
             body: JSON.stringify({
               pathname: pathname,
               url: url,
-              expired_at: timestamp,
+              expire_days: expireDays,
               permanent: permanent,
               permanent_password: permanentPassword,
+              verification_proof: hasReusableVerification()
+                ? verificationProof
+                : null,
               turnstile_token: turnstileToken,
             }),
           });
@@ -809,6 +847,8 @@
                 (text.substring(0, 100) || "空响应")
             );
           }
+
+          refreshVerificationWindow(result);
 
           if (!response.ok) {
             showError(result.error || "提交失败");
