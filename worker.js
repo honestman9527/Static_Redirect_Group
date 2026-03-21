@@ -200,19 +200,19 @@ export default {
       }
 
       // 1. 验证输入
-      if (
-        !pathname ||
-        typeof pathname !== "string" ||
-        pathname.length < 5 ||
-        pathname.length > 10
-      ) {
+      if (typeof pathname !== "string") {
+        pathname = "";
+      }
+      pathname = pathname.trim();
+
+      if (pathname && (pathname.length < 5 || pathname.length > 10)) {
         return verifiedResponse(
           { error: "Invalid pathname (5-10 chars)" },
           { status: 400 }
         );
       }
       // 简单正则验证 pathname 是否只包含允许字符
-      if (!/^[a-zA-Z0-9_-]+$/.test(pathname)) {
+      if (pathname && !/^[a-zA-Z0-9_-]+$/.test(pathname)) {
         return verifiedResponse(
           { error: "Invalid characters in pathname" },
           { status: 400 }
@@ -443,6 +443,16 @@ export default {
         return JSON.parse(jsonStr);
       }
 
+      function generateRandomPathname(length = 6) {
+        const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+        let result = "";
+        const randomValues = crypto.getRandomValues(new Uint8Array(length));
+        for (let i = 0; i < length; i++) {
+          result += chars[randomValues[i] % chars.length];
+        }
+        return result;
+      }
+
       let fileData;
       let directFileData;
       try {
@@ -468,10 +478,32 @@ export default {
         return verifiedResponse({ error: "File content is not valid JSON" }, { status: 500 });
       }
 
-      // 检查是否已存在
-      const pathKey = "/" + pathname;
-      if (rules[pathKey] || directRules[pathKey]) {
-        return verifiedResponse({ error: "Pathname already exists" }, { status: 409 });
+      // 检查是否已存在；若未填写则自动生成一个可用路径
+      let finalPathname = pathname;
+      let pathKey = "";
+
+      if (!finalPathname) {
+        let attempts = 0;
+        do {
+          finalPathname = generateRandomPathname();
+          pathKey = "/" + finalPathname;
+          attempts += 1;
+        } while ((rules[pathKey] || directRules[pathKey]) && attempts < 20);
+
+        if (!pathKey || rules[pathKey] || directRules[pathKey]) {
+          return verifiedResponse(
+            { error: "Failed to generate an available pathname" },
+            { status: 500 }
+          );
+        }
+      } else {
+        pathKey = "/" + finalPathname;
+        if (rules[pathKey] || directRules[pathKey]) {
+          return verifiedResponse(
+            { error: "Pathname already exists" },
+            { status: 409 }
+          );
+        }
       }
 
       // 添加新规则
@@ -495,7 +527,7 @@ export default {
       const finalBase64 = btoa(binary);
 
       const putUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
-      const commitMessage = `Add short link: ${pathname}`;
+      const commitMessage = `Add short link: ${finalPathname}`;
 
       const putResp = await fetch(putUrl, {
         method: "PUT",
@@ -521,7 +553,7 @@ export default {
 
       // 构建返回的短链 URL
       const baseDomain = env.BASE_DOMAIN || "";
-      const shortUrl = baseDomain ? `https://${baseDomain}/${pathname}` : null; // 如果后端没配，前端自己拼
+      const shortUrl = baseDomain ? `https://${baseDomain}/${finalPathname}` : null; // 如果后端没配，前端自己拼
 
       const putRespData = await putResp.json();
 

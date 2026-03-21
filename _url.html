@@ -497,7 +497,7 @@
           </div>
         </div>
 
-        <div class="hero-footer">路径支持字母、数字、下划线与连字符，长度 5-10 位。</div>
+        <div class="hero-footer">路径可手动填写，也可留空由系统自动生成，最终长度仍为 5-10 位。</div>
       </section>
 
       <section class="card">
@@ -529,17 +529,15 @@
               <div class="form-group">
                 <div class="label-row">
                   <label for="pathname">短链路径</label>
-                  <span class="help">5-10 位</span>
+                  <span class="help">可留空自动生成</span>
                 </div>
                 <input
                   type="text"
                   id="pathname"
                   name="pathname"
-                  minlength="5"
                   maxlength="10"
-                  required
-                  pattern="[a-zA-Z0-9_-]{5,10}"
-                  placeholder="例如: mylink"
+                  pattern="[a-zA-Z0-9_-]{0,10}"
+                  placeholder="例如: mylink，留空则自动生成"
                 />
               </div>
 
@@ -794,8 +792,13 @@
         const permanent = isPermanentMode();
         const permanentPassword = passwordInput.value;
 
-        if (pathname.length < 5 || pathname.length > 10) {
-          showError("路径长度必须在 5-10 位之间");
+        if (pathname && (pathname.length < 5 || pathname.length > 10)) {
+          showError("手动填写的路径长度必须在 5-10 位之间");
+          return;
+        }
+
+        if (pathname && !/^[a-zA-Z0-9_-]+$/.test(pathname)) {
+          showError("路径只能包含字母、数字、下划线和连字符");
           return;
         }
 
