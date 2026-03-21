@@ -34,5 +34,13 @@ window.RULES_INTERMEDIATE = {
     "/56546": {
         "url": "https://cf.090227.xyz/",
         "expired_at": "2026-01-16T09:57:00.000Z"
+    },
+    "/bili123": {
+        "url": "https://www.bilibili.com/video/BV1k9wDzKEvS/?spm_id_from=333.1007.tianma.1-1-1.click",
+        "expired_at": "2026-03-27T14:04:00.000Z"
+    },
+    "/cpamc": {
+        "url": "https://cli-proxy-api-latest-n40o.onrender.com/management.html#/",
+        "expired_at": ""
     }
 };
