@@ -50,17 +50,19 @@ export default {
       }
     }
 
-    try {
-      let pathname, url, expired_at, turnstile_token;
       try {
-        const body = await request.json();
-        pathname = body.pathname;
-        url = body.url;
-        expired_at = body.expired_at;
-        turnstile_token = body.turnstile_token;
-      } catch (e) {
-        return Response.json(
-          { error: "Invalid JSON body" },
+        let pathname, url, expired_at, turnstile_token, permanent, permanent_password;
+        try {
+          const body = await request.json();
+          pathname = body.pathname;
+          url = body.url;
+          expired_at = body.expired_at;
+          turnstile_token = body.turnstile_token;
+          permanent = body.permanent === true;
+          permanent_password = body.permanent_password;
+        } catch (e) {
+          return Response.json(
+            { error: "Invalid JSON body" },
           {
             status: 400,
             headers: { "Access-Control-Allow-Origin": "*" },
@@ -273,60 +275,89 @@ export default {
         );
       }
 
-      if (!expired_at || typeof expired_at !== "number") {
-        return Response.json(
-          { error: "Invalid expiration timestamp" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
-      }
+      let expiredAtISO = "";
+      if (permanent) {
+        const permanentPassword = env.PERMANENT_LINK_PASSWORD;
 
-      // 2. 准备数据
-      // 将 Unix 时间戳转换为 ISO 8601 字符串
-      const expiredDate = new Date(expired_at * 1000);
-      const now = new Date();
-      if (isNaN(expiredDate.getTime())) {
-        return Response.json(
-          { error: "Invalid timestamp" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
-      }
+        if (!permanentPassword) {
+          return Response.json(
+            { error: "Server configuration error: permanent password not set" },
+            {
+              status: 500,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
 
-      // 检查有效期是否超过 7 天
-      const diffTime = expiredDate.getTime() - now.getTime();
-      const diffDays = diffTime / (1000 * 3600 * 24);
-      if (diffDays > 7) {
-        return Response.json(
-          { error: "Expiration date cannot exceed 7 days from now" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
-      }
-      // 检查有效期是否在过去
-      if (diffTime <= 0) {
-        return Response.json(
-          { error: "Expiration date must be in the future" },
-          {
-            status: 400,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
-      }
+        if (
+          typeof permanent_password !== "string" ||
+          permanent_password !== permanentPassword
+        ) {
+          return Response.json(
+            { error: "长期短链密码验证失败" },
+            {
+              status: 403,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
+      } else {
+        if (!expired_at || typeof expired_at !== "number") {
+          return Response.json(
+            { error: "Invalid expiration timestamp" },
+            {
+              status: 400,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
 
-      const expiredAtISO = expiredDate.toISOString();
+        // 2. 准备数据
+        // 将 Unix 时间戳转换为 ISO 8601 字符串
+        const expiredDate = new Date(expired_at * 1000);
+        const now = new Date();
+        if (isNaN(expiredDate.getTime())) {
+          return Response.json(
+            { error: "Invalid timestamp" },
+            {
+              status: 400,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
+
+        // 检查有效期是否超过 7 天
+        const diffTime = expiredDate.getTime() - now.getTime();
+        const diffDays = diffTime / (1000 * 3600 * 24);
+        if (diffDays > 7) {
+          return Response.json(
+            { error: "Expiration date cannot exceed 7 days from now" },
+            {
+              status: 400,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
+        // 检查有效期是否在过去
+        if (diffTime <= 0) {
+          return Response.json(
+            { error: "Expiration date must be in the future" },
+            {
+              status: 400,
+              headers: { "Access-Control-Allow-Origin": "*" },
+            }
+          );
+        }
+
+        expiredAtISO = expiredDate.toISOString();
+      }
 
       // 3. 获取 GitHub 文件
       const owner = env.GITHUB_OWNER; // 需要在 Worker 环境变量中设置
       const repo = env.GITHUB_REPO; // 需要在 Worker 环境变量中设置
       const branch = env.GITHUB_BRANCH || "main";
       const filePath = "js/rules_intermediate.js";
+      const directFilePath = "js/rules_direct.js";
       const token = env.GITHUB_TOKEN;
 
       if (!token || !owner || !repo) {
@@ -339,21 +370,59 @@ export default {
         );
       }
 
-      const getUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+      async function fetchGitHubFile(targetPath) {
+        const getUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${targetPath}?ref=${branch}`;
 
-      const getResp = await fetch(getUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "User-Agent": "Cloudflare-Worker",
-          Accept: "application/vnd.github.v3+json",
-        },
-      });
+        const response = await fetch(getUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": "Cloudflare-Worker",
+            Accept: "application/vnd.github.v3+json",
+          },
+        });
 
-      if (!getResp.ok) {
-        const errText = await getResp.text();
-        console.error("GitHub Fetch Error:", errText);
+        if (!response.ok) {
+          const errText = await response.text();
+          console.error("GitHub Fetch Error:", errText);
+          throw new Error(
+            `Failed to fetch file from GitHub: ${response.status} (${targetPath})`
+          );
+        }
+
+        return response.json();
+      }
+
+      function decodeGitHubContent(fileData) {
+        const binaryString = atob(fileData.content.replace(/\s/g, ""));
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return new TextDecoder("utf-8").decode(bytes);
+      }
+
+      function parseRulesContent(content) {
+        const jsonStart = content.indexOf("{");
+        const jsonEnd = content.lastIndexOf("}");
+
+        if (jsonStart === -1 || jsonEnd === -1) {
+          throw new Error("Failed to parse file content");
+        }
+
+        const jsonStr = content.substring(jsonStart, jsonEnd + 1);
+        return JSON.parse(jsonStr);
+      }
+
+      let fileData;
+      let directFileData;
+      try {
+        [fileData, directFileData] = await Promise.all([
+          fetchGitHubFile(filePath),
+          fetchGitHubFile(directFilePath),
+        ]);
+      } catch (error) {
         return Response.json(
-          { error: "Failed to fetch file from GitHub: " + getResp.status },
+          { error: error.message },
           {
             status: 502,
             headers: { "Access-Control-Allow-Origin": "*" },
@@ -361,40 +430,17 @@ export default {
         );
       }
 
-      const fileData = await getResp.json();
-
       // 4. 解析并更新内容
       // 正确处理 UTF-8 解码: Base64 -> Uint8Array -> String
-      const binaryString = atob(fileData.content.replace(/\s/g, ""));
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      const content = new TextDecoder("utf-8").decode(bytes);
+      const content = decodeGitHubContent(fileData);
+      const directContent = decodeGitHubContent(directFileData);
       const sha = fileData.sha;
-
-      // 提取 JSON 部分: window.RULES_INTERMEDIATE = {...};
-      const jsonStart = content.indexOf("{");
-      const jsonEnd = content.lastIndexOf("}");
-
-      if (jsonStart === -1 || jsonEnd === -1) {
-        return Response.json(
-          { error: "Failed to parse file content" },
-          {
-            status: 500,
-            headers: { "Access-Control-Allow-Origin": "*" },
-          }
-        );
-      }
-
-      const jsonStr = content.substring(jsonStart, jsonEnd + 1);
       let rules;
+      let directRules;
       try {
-        // 使用 Function 而不是 eval 来解析 JS 对象字面量 (如果它是标准 JSON 最好，但如果是 JS 对象可能包含无引号键)
-        // 既然我们生成的文件是 JSON.stringify 出来的，它应该是标准 JSON。
-        rules = JSON.parse(jsonStr);
+        rules = parseRulesContent(content);
+        directRules = parseRulesContent(directContent);
       } catch (e) {
-        // 如果 JSON.parse 失败，尝试更宽松的解析或报错
         return Response.json(
           { error: "File content is not valid JSON" },
           {
@@ -406,7 +452,7 @@ export default {
 
       // 检查是否已存在
       const pathKey = "/" + pathname;
-      if (rules[pathKey]) {
+      if (rules[pathKey] || directRules[pathKey]) {
         return Response.json(
           { error: "Pathname already exists" },
           {
