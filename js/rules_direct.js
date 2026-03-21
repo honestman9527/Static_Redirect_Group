@@ -23,8 +23,12 @@ window.RULES_DIRECT = {
         "url": "https://nav.dmsoul.com",
         "expired_at": ""
     },
-    "/imgbed": {
+    "/img": {
         "url": "https://raw.7s.nz",
+        "expired_at": ""
+    },
+    "/cs": {
+        "url": "https://kejcotqnjxec.ap-northeast-1.clawcloudrun.com/resource",
         "expired_at": ""
     }
 };
