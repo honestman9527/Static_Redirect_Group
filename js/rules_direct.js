@@ -30,5 +30,9 @@ window.RULES_DIRECT = {
     "/cs": {
         "url": "https://kejcotqnjxec.ap-northeast-1.clawcloudrun.com/resource",
         "expired_at": ""
+    }, 
+    "/novel": {
+        "url": "https://novel.dmsoul.com",
+        "expired_at": ""
     }
 };
