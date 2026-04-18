@@ -39,7 +39,7 @@ window.RULES_DIRECT = {
         "url": "https://cpa.7s.nz/management.html",
         "expired_at": ""
     },"/xs": {
-        "url": "https://xiaoshuo.7s.nz/",
+        "url": "https://xs.7s.nz/",
         "expired_at": ""
     },
 };
