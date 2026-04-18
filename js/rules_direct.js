@@ -38,5 +38,8 @@ window.RULES_DIRECT = {
     "/cpa": {
         "url": "https://cpa.7s.nz/management.html",
         "expired_at": ""
+    },"/xs": {
+        "url": "https://novel.dmsoul.com",
+        "expired_at": ""
     },
 };
