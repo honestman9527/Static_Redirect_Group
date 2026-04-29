@@ -31,15 +31,8 @@ window.RULES_DIRECT = {
         "url": "https://kejcotqnjxec.ap-northeast-1.clawcloudrun.com/resource",
         "expired_at": ""
     }, 
-    "/novel": {
-        "url": "https://novel.dmsoul.com",
-        "expired_at": ""
-    },
-    "/cpa": {
-        "url": "https://cpa.7s.nz/management.html",
-        "expired_at": ""
-    },"/xs": {
-        "url": "https://xs.7s.nz/",
+    "/xs": {
+        "url": "https://novel.7s.nz/",
         "expired_at": ""
     },
 };
