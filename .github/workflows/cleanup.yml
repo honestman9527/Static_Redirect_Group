@@ -1,0 +1,41 @@
+name: Cleanup Expired Links
+
+on:
+  schedule:
+    # 每天 UTC 00:00 运行 (北京时间 08:00)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run cleanup script
+        run: node cleanup_expired.js
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # 检查是否有文件变更
+          if [[ -n $(git status -s) ]]; then
+            git add js/rules_intermediate.js js/rules_direct.js
+            git commit -m "chore: remove expired short links [skip ci]"
+            git push
+            echo "Changes pushed successfully."
+          else
+            echo "No changes to commit."
+          fi
