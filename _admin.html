@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>管理员直链 - 7s.nz</title>
+    <link rel="icon" type="image/x-icon" href="/logo.ico" />
+    <link rel="stylesheet" href="/css/admin.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand">
+          <h1>管理员直链</h1>
+          <p>添加、修改或删除无中间页短链，提交后会写入 GitHub 规则文件。</p>
+        </div>
+        <div class="top-actions">
+          <a class="button secondary-button" href="/_url">创建普通短链</a>
+          <button type="button" class="secondary-button hidden" id="logoutBtn">
+            退出登录
+          </button>
+        </div>
+      </header>
+
+      <section class="panel login-panel" id="loginPanel">
+        <h2>登录管理</h2>
+        <p>使用 Worker 环境变量中的 ADMIN_PASSWORD 登录。</p>
+        <form id="loginForm" class="form-grid">
+          <div class="form-group">
+            <div class="label-row">
+              <label for="admin_password">管理员密码</label>
+              <span class="help">ADMIN_PASSWORD</span>
+            </div>
+            <input
+              type="password"
+              id="admin_password"
+              name="admin_password"
+              autocomplete="current-password"
+              placeholder="请输入管理员密码"
+              required
+            />
+          </div>
+          <button type="submit" id="loginBtn">登录</button>
+        </form>
+        <div id="loginStatus" class="status"></div>
+      </section>
+
+      <section class="hidden" id="managePanel">
+        <div class="stats" aria-live="polite">
+          <div class="stat">
+            <span>直链总数</span>
+            <strong id="totalCount">0</strong>
+          </div>
+          <div class="stat">
+            <span>当前显示</span>
+            <strong id="visibleCount">0</strong>
+          </div>
+          <div class="stat">
+            <span>编辑状态</span>
+            <strong id="editState">新增</strong>
+          </div>
+        </div>
+
+        <div class="admin-shell">
+          <section class="panel form-panel">
+            <h2 id="formTitle">添加直链</h2>
+            <p class="panel-subtitle">直链路径支持 1-64 位字母、数字、下划线或连字符。</p>
+            <form id="directForm" class="form-grid">
+              <div class="form-group">
+                <div class="label-row">
+                  <label for="pathname">直链路径</label>
+                  <span class="help">无需输入开头 /</span>
+                </div>
+                <input
+                  type="text"
+                  id="pathname"
+                  name="pathname"
+                  maxlength="64"
+                  pattern="[a-zA-Z0-9_-]{1,64}"
+                  placeholder="例如: docs"
+                  required
+                />
+              </div>
+
+              <div class="form-group">
+                <div class="label-row">
+                  <label for="target_url">目标 URL</label>
+                  <span class="help">最大 300 字符</span>
+                </div>
+                <input
+                  type="url"
+                  id="target_url"
+                  name="target_url"
+                  maxlength="300"
+                  placeholder="https://example.com"
+                  required
+                />
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" id="saveBtn">添加直链</button>
+                <button
+                  type="button"
+                  class="secondary-button hidden"
+                  id="cancelEditBtn"
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+            <div id="status" class="status"></div>
+          </section>
+
+          <section class="panel list-panel">
+            <div class="list-toolbar">
+              <div>
+                <h2>已有直链</h2>
+                <p class="panel-subtitle">列表来自当前仓库的 direct 规则文件。</p>
+              </div>
+              <div class="list-tools">
+                <input
+                  type="search"
+                  id="searchInput"
+                  placeholder="筛选路径或 URL"
+                  autocomplete="off"
+                />
+                <button type="button" class="secondary-button" id="refreshBtn">
+                  刷新
+                </button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>路径</th>
+                    <th>目标 URL</th>
+                    <th>短链</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="linksBody">
+                  <tr>
+                    <td colspan="4">
+                      <div class="empty-state">登录后加载直链列表。</div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const loginPanel = document.getElementById("loginPanel");
+      const managePanel = document.getElementById("managePanel");
+      const loginForm = document.getElementById("loginForm");
+      const directForm = document.getElementById("directForm");
+      const loginBtn = document.getElementById("loginBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const saveBtn = document.getElementById("saveBtn");
+      const cancelEditBtn = document.getElementById("cancelEditBtn");
+      const passwordInput = document.getElementById("admin_password");
+      const pathnameInput = document.getElementById("pathname");
+      const urlInput = document.getElementById("target_url");
+      const searchInput = document.getElementById("searchInput");
+      const linksBody = document.getElementById("linksBody");
+      const statusBox = document.getElementById("status");
+      const loginStatusBox = document.getElementById("loginStatus");
+      const totalCount = document.getElementById("totalCount");
+      const visibleCount = document.getElementById("visibleCount");
+      const editState = document.getElementById("editState");
+      const formTitle = document.getElementById("formTitle");
+
+      let adminToken = localStorage.getItem("admin_token") || "";
+      let editingPathname = "";
+      let links = [];
+
+      function setStatus(target, type, content) {
+        target.className = "status visible " + type;
+        target.textContent = content;
+      }
+
+      function clearStatus(target) {
+        target.className = "status";
+        target.textContent = "";
+      }
+
+      async function parseJsonResponse(response) {
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch (error) {
+          console.error("Non-JSON response:", text);
+          throw new Error(
+            "服务器返回了非预期的数据: " +
+              (text.substring(0, 100) || "空响应")
+          );
+        }
+      }
+
+      function setLoggedIn(loggedIn) {
+        loginPanel.classList.toggle("hidden", loggedIn);
+        managePanel.classList.toggle("hidden", !loggedIn);
+        logoutBtn.classList.toggle("hidden", !loggedIn);
+      }
+
+      function buildHeaders() {
+        return {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + adminToken,
+        };
+      }
+
+      function buildShortUrl(pathname) {
+        return window.location.origin + "/" + pathname;
+      }
+
+      function resetEdit() {
+        editingPathname = "";
+        directForm.reset();
+        pathnameInput.disabled = false;
+        formTitle.textContent = "添加直链";
+        saveBtn.textContent = "添加直链";
+        cancelEditBtn.classList.add("hidden");
+        editState.textContent = "新增";
+      }
+
+      function getFilteredLinks() {
+        const query = searchInput.value.trim().toLowerCase();
+        if (!query) return links;
+
+        return links.filter(function (link) {
+          return (
+            link.path.toLowerCase().includes(query) ||
+            link.url.toLowerCase().includes(query)
+          );
+        });
+      }
+
+      function updateCounts(filteredLinks) {
+        totalCount.textContent = String(links.length);
+        visibleCount.textContent = String(filteredLinks.length);
+      }
+
+      function createTextCell(label, text, className) {
+        const cell = document.createElement("td");
+        cell.dataset.label = label;
+        const span = document.createElement("span");
+        span.className = className;
+        span.textContent = text;
+        cell.appendChild(span);
+        return cell;
+      }
+
+      function renderLinks() {
+        const filteredLinks = getFilteredLinks();
+        updateCounts(filteredLinks);
+        linksBody.innerHTML = "";
+
+        if (!filteredLinks.length) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 4;
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.textContent = links.length ? "没有匹配的直链。" : "还没有直链规则。";
+          cell.appendChild(empty);
+          row.appendChild(cell);
+          linksBody.appendChild(row);
+          return;
+        }
+
+        filteredLinks.forEach(function (link) {
+          const row = document.createElement("tr");
+
+          const pathCell = document.createElement("td");
+          pathCell.dataset.label = "路径";
+          const pathText = document.createElement("span");
+          pathText.className = "path-main";
+          pathText.textContent = link.path;
+          pathCell.appendChild(pathText);
+
+          const urlCell = createTextCell("目标 URL", link.url, "target-url");
+
+          const shortCell = document.createElement("td");
+          shortCell.dataset.label = "短链";
+          const shortLink = document.createElement("a");
+          shortLink.className = "short-link";
+          shortLink.href = buildShortUrl(link.pathname);
+          shortLink.target = "_blank";
+          shortLink.rel = "noopener noreferrer";
+          shortLink.textContent = shortLink.href;
+          shortCell.appendChild(shortLink);
+
+          const actionCell = document.createElement("td");
+          actionCell.dataset.label = "操作";
+          const actions = document.createElement("div");
+          actions.className = "row-actions";
+
+          const copyButton = document.createElement("button");
+          copyButton.type = "button";
+          copyButton.className = "secondary-button";
+          copyButton.textContent = "复制";
+          copyButton.addEventListener("click", function () {
+            copyShortLink(link.pathname);
+          });
+
+          const editButton = document.createElement("button");
+          editButton.type = "button";
+          editButton.className = "secondary-button";
+          editButton.textContent = "编辑";
+          editButton.addEventListener("click", function () {
+            editingPathname = link.pathname;
+            pathnameInput.value = link.pathname;
+            pathnameInput.disabled = true;
+            urlInput.value = link.url;
+            formTitle.textContent = "编辑 " + link.path;
+            saveBtn.textContent = "保存修改";
+            cancelEditBtn.classList.remove("hidden");
+            editState.textContent = "编辑中";
+            clearStatus(statusBox);
+            urlInput.focus();
+          });
+
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "danger-button";
+          deleteButton.textContent = "删除";
+          deleteButton.addEventListener("click", function () {
+            deleteLink(link.pathname);
+          });
+
+          actions.appendChild(copyButton);
+          actions.appendChild(editButton);
+          actions.appendChild(deleteButton);
+          actionCell.appendChild(actions);
+
+          row.appendChild(pathCell);
+          row.appendChild(urlCell);
+          row.appendChild(shortCell);
+          row.appendChild(actionCell);
+          linksBody.appendChild(row);
+        });
+      }
+
+      async function copyShortLink(pathname) {
+        const shortUrl = buildShortUrl(pathname);
+        try {
+          await navigator.clipboard.writeText(shortUrl);
+          setStatus(statusBox, "success", "短链已复制。");
+        } catch (error) {
+          console.error(error);
+          setStatus(statusBox, "error", "复制失败，请手动复制短链。");
+        }
+      }
+
+      async function loadLinks(options) {
+        if (!adminToken) return;
+
+        const silent = options && options.silent;
+        refreshBtn.disabled = true;
+        if (!silent) {
+          setStatus(statusBox, "pending", "正在加载直链列表...");
+        }
+
+        try {
+          const response = await fetch("/api/admin/direct", {
+            method: "GET",
+            headers: {
+              Authorization: "Bearer " + adminToken,
+            },
+          });
+          const result = await parseJsonResponse(response);
+
+          if (!response.ok) {
+            if (response.status === 401) {
+              localStorage.removeItem("admin_token");
+              adminToken = "";
+              setLoggedIn(false);
+            }
+            throw new Error(result.error || "加载直链列表失败");
+          }
+
+          links = result.links || [];
+          renderLinks();
+          if (!silent) {
+            clearStatus(statusBox);
+          }
+        } catch (error) {
+          console.error(error);
+          setStatus(statusBox, "error", error.message || "加载直链列表失败");
+        } finally {
+          refreshBtn.disabled = false;
+        }
+      }
+
+      async function saveLink(event) {
+        event.preventDefault();
+        clearStatus(statusBox);
+
+        const pathname = pathnameInput.value.trim();
+        const url = urlInput.value.trim();
+
+        if (!pathname || !/^[a-zA-Z0-9_-]{1,64}$/.test(pathname)) {
+          setStatus(statusBox, "error", "直链路径必须为 1-64 位字母、数字、下划线或连字符。");
+          return;
+        }
+
+        if (!url || url.length > 300) {
+          setStatus(statusBox, "error", "目标 URL 不能为空且不能超过 300 字符。");
+          return;
+        }
+
+        saveBtn.disabled = true;
+        const targetPathname = editingPathname || pathname;
+        const endpoint = editingPathname
+          ? "/api/admin/direct/" + encodeURIComponent(targetPathname)
+          : "/api/admin/direct";
+        const method = editingPathname ? "PUT" : "POST";
+
+        try {
+          const response = await fetch(endpoint, {
+            method: method,
+            headers: buildHeaders(),
+            body: JSON.stringify({
+              pathname: pathname,
+              url: url,
+            }),
+          });
+          const result = await parseJsonResponse(response);
+
+          if (!response.ok) {
+            throw new Error(result.error || "保存直链失败");
+          }
+
+          const successMessage = editingPathname
+            ? "直链已提交修改，等待构建生效。"
+            : "直链已提交创建，等待构建生效。";
+          resetEdit();
+          await loadLinks({ silent: true });
+          setStatus(statusBox, "success", successMessage);
+        } catch (error) {
+          console.error(error);
+          setStatus(statusBox, "error", error.message || "保存直链失败");
+        } finally {
+          saveBtn.disabled = false;
+        }
+      }
+
+      async function deleteLink(pathname) {
+        if (!confirm("确定删除 /" + pathname + " 吗？")) return;
+
+        clearStatus(statusBox);
+
+        try {
+          const response = await fetch(
+            "/api/admin/direct/" + encodeURIComponent(pathname),
+            {
+              method: "DELETE",
+              headers: {
+                Authorization: "Bearer " + adminToken,
+              },
+            }
+          );
+          const result = await parseJsonResponse(response);
+
+          if (!response.ok) {
+            throw new Error(result.error || "删除直链失败");
+          }
+
+          if (editingPathname === pathname) {
+            resetEdit();
+          }
+          await loadLinks({ silent: true });
+          setStatus(statusBox, "success", "直链已提交删除，等待构建生效。");
+        } catch (error) {
+          console.error(error);
+          setStatus(statusBox, "error", error.message || "删除直链失败");
+        }
+      }
+
+      loginForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        clearStatus(loginStatusBox);
+
+        const password = passwordInput.value;
+        if (!password) {
+          setStatus(loginStatusBox, "error", "请输入管理员密码。");
+          return;
+        }
+
+        loginBtn.disabled = true;
+
+        try {
+          const response = await fetch("/api/admin/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ password: password }),
+          });
+          const result = await parseJsonResponse(response);
+
+          if (!response.ok) {
+            throw new Error(result.error || "登录失败");
+          }
+
+          adminToken = result.token;
+          localStorage.setItem("admin_token", adminToken);
+          loginForm.reset();
+          setLoggedIn(true);
+          await loadLinks();
+        } catch (error) {
+          console.error(error);
+          setStatus(loginStatusBox, "error", error.message || "登录失败");
+        } finally {
+          loginBtn.disabled = false;
+        }
+      });
+
+      logoutBtn.addEventListener("click", function () {
+        adminToken = "";
+        links = [];
+        localStorage.removeItem("admin_token");
+        resetEdit();
+        renderLinks();
+        setLoggedIn(false);
+        clearStatus(statusBox);
+        clearStatus(loginStatusBox);
+      });
+
+      directForm.addEventListener("submit", saveLink);
+      cancelEditBtn.addEventListener("click", function () {
+        resetEdit();
+        clearStatus(statusBox);
+      });
+      refreshBtn.addEventListener("click", loadLinks);
+      searchInput.addEventListener("input", renderLinks);
+
+      setLoggedIn(Boolean(adminToken));
+      if (adminToken) {
+        loadLinks();
+      }
+    </script>
+  </body>
+</html>

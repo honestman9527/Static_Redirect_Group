@@ -177,7 +177,7 @@ function normalizePathname(value, { minLength, maxLength }) {
     throw new HttpError("Invalid characters in pathname", 400);
   }
 
-  if (["api", "js", "_url"].includes(pathname.toLowerCase())) {
+  if (["api", "js", "_url", "_admin"].includes(pathname.toLowerCase())) {
     throw new HttpError("Pathname is reserved", 400);
   }
 
