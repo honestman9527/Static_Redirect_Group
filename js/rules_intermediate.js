@@ -42,5 +42,9 @@ window.RULES_INTERMEDIATE = {
     "/cpamc": {
         "url": "https://cli-proxy-api-latest-n40o.onrender.com/management.html#/",
         "expired_at": ""
+    },
+    "/sgx4b7": {
+        "url": "https://www.baidu.com",
+        "expired_at": "2026-06-01T09:08:15.164Z"
     }
 };
