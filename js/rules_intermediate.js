@@ -1,5 +1,5 @@
 window.RULES_INTERMEDIATE = {
-    "/githello": {
+    "/github": {
         "url": "https://github.com",
         "expired_at": ""
     },
@@ -38,10 +38,6 @@ window.RULES_INTERMEDIATE = {
     "/bili123": {
         "url": "https://www.bilibili.com/video/BV1k9wDzKEvS/?spm_id_from=333.1007.tianma.1-1-1.click",
         "expired_at": "2026-03-27T14:04:00.000Z"
-    },
-    "/cpamc": {
-        "url": "https://cli-proxy-api-latest-n40o.onrender.com/management.html#/",
-        "expired_at": ""
     },
     "/sgx4b7": {
         "url": "https://www.baidu.com",
